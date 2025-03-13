@@ -1,17 +1,21 @@
 import socketio
 import subprocess
 import sys
-import requests
 import asyncio
 import re
 import time
-from typing import Dict, Optional
+import json
+import os
+from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 
 # Устанавливаем кодировку для корректного отображения русских символов
 if sys.platform.startswith('win'):
     # Для Windows: меняем кодировку консоли на UTF-8
     subprocess.run('chcp 65001', shell=True)
+
+# Путь к файлу конфигурации
+CONFIG_FILE = "ping_monitor_config.json"
 
 class PingMonitor:
     def __init__(self, provider_name: str, hosts: list):
@@ -21,9 +25,11 @@ class PingMonitor:
         # Создаем один клиент Socket.IO с настройками переподключения
         self.sio = socketio.Client(reconnection=True, reconnection_attempts=10, 
                                 reconnection_delay=1, reconnection_delay_max=5)
-        self.retry_interval = 300
+        self.retry_interval = 300  # 5 минут
         self.ping_interval = 1.0
         self.setup_socket_handlers()
+        self.ping_failures: Dict[str, int] = {}  # Счетчик последовательных неудач для каждого хоста
+        self.max_consecutive_failures = 5  # Максимальное количество последовательных неудач перед сбросом
         
     def setup_socket_handlers(self):
         @self.sio.event
@@ -54,6 +60,40 @@ class PingMonitor:
         @self.sio.on('execute')
         def on_execute(data):
             print(f"[DEBUG] Получена команда: {data}")
+            
+            # Проверяем, является ли команда запросом на перезапуск
+            if data.lower() == "restart_client":
+                print("[INFO] Получена команда перезапуска клиента")
+                self.sio.emit('command_result', f"[{self.provider_name}] Перезапуск клиента...")
+                
+                # Запускаем процесс перезапуска
+                try:
+                    # Получаем путь к текущему скрипту
+                    script_path = os.path.abspath(sys.argv[0])
+                    
+                    # Создаем команду для запуска нового экземпляра
+                    if sys.platform.startswith('win'):
+                        # Для Windows используем start /b чтобы запустить в фоне
+                        restart_cmd = f'start /b python "{script_path}"'
+                    else:
+                        # Для Linux/Mac
+                        restart_cmd = f'python3 "{script_path}" &'
+                    
+                    # Запускаем новый экземпляр
+                    subprocess.Popen(restart_cmd, shell=True)
+                    
+                    # Отправляем сообщение об успешном запуске нового экземпляра
+                    self.sio.emit('command_result', f"[{self.provider_name}] Новый экземпляр клиента запущен")
+                    
+                    # Завершаем текущий процесс через небольшую задержку
+                    time.sleep(2)
+                    sys.exit(0)
+                    
+                except Exception as e:
+                    self.sio.emit('command_result', f"[{self.provider_name}] Ошибка при перезапуске: {str(e)}")
+                
+                return
+            
             try:
                 # Запускаем процесс CMD с перенаправлением вывода
                 process = subprocess.Popen(
@@ -100,6 +140,9 @@ class PingMonitor:
             if hosts:
                 self.hosts = hosts
                 print(f'[DEBUG] Список хостов обновлен: {", ".join(hosts)}')
+                
+                # Сохраняем обновленные хосты в конфигурацию
+                save_config(self.provider_name, self.hosts)
             else:
                 print('[ERROR] Получен пустой список хостов')
         
@@ -127,18 +170,7 @@ class PingMonitor:
                 
                 # Проверяем статус выполнения команды
                 if process.returncode != 0:
-                    # Проверяем, может ли это быть проблема с DNS
-                    if "не удается найти узел" in output or "could not find host" in output.lower():
-                        print(f"[ERROR] Проблема с DNS для хоста {host}")
-                    # Проверяем, может ли это быть проблема с маршрутизацией
-                    elif "превышен интервал ожидания" in output or "timed out" in output.lower():
-                        print(f"[ERROR] Таймаут при пинге хоста {host}")
-                    else:
-                        print(f"[ERROR] Ping command failed for {host} with return code {process.returncode}")
-                    
-                    # Добавляем хост в список неудачных с текущим временем
-                    self.failed_hosts[host] = datetime.now()
-                    return None
+                    raise Exception(f"Ping command failed with return code {process.returncode}")
                 
                 match = re.search(r'время=(\d+)мс|time[<=](\d+)ms', output)
                 
@@ -146,20 +178,42 @@ class PingMonitor:
                     # Успешный пинг - удаляем из списка неудачных, если он там был
                     if host in self.failed_hosts:
                         del self.failed_hosts[host]
+                    
+                    # Сбрасываем счетчик неудач
+                    self.ping_failures[host] = 0
+                    
                     return int(match.group(1) or match.group(2))
                 
-                # Если пинг не прошел, добавляем хост в черный список с текущим временем
-                self.failed_hosts[host] = datetime.now()
+                # Увеличиваем счетчик неудач
+                self.ping_failures[host] = self.ping_failures.get(host, 0) + 1
+                
+                # Если превышен лимит последовательных неудач, добавляем хост в черный список
+                if self.ping_failures[host] >= self.max_consecutive_failures:
+                    self.failed_hosts[host] = datetime.now()
+                    print(f"[WARNING] Хост {host} добавлен в черный список после {self.max_consecutive_failures} последовательных неудач")
+                
                 return None
                 
             except asyncio.TimeoutError:
-                print(f"[ERROR] Timeout when pinging {host}")
-                self.failed_hosts[host] = datetime.now()
+                # Увеличиваем счетчик неудач
+                self.ping_failures[host] = self.ping_failures.get(host, 0) + 1
+                
+                # Если превышен лимит последовательных неудач, добавляем хост в черный список
+                if self.ping_failures[host] >= self.max_consecutive_failures:
+                    self.failed_hosts[host] = datetime.now()
+                    print(f"[WARNING] Хост {host} добавлен в черный список после {self.max_consecutive_failures} последовательных неудач (таймаут)")
+                
                 return None
                 
         except Exception as e:
-            print(f"[ERROR] Exception when pinging {host}: {str(e)}")
-            self.failed_hosts[host] = datetime.now()
+            # Увеличиваем счетчик неудач
+            self.ping_failures[host] = self.ping_failures.get(host, 0) + 1
+            
+            # Если превышен лимит последовательных неудач, добавляем хост в черный список
+            if self.ping_failures[host] >= self.max_consecutive_failures:
+                self.failed_hosts[host] = datetime.now()
+                print(f"[WARNING] Хост {host} добавлен в черный список после {self.max_consecutive_failures} последовательных неудач: {str(e)}")
+            
             return None
 
     async def run(self):
@@ -168,9 +222,9 @@ class PingMonitor:
 
         while retry_count < max_retries:
             try:
-                print(f"[DEBUG] Подключение к серверу: http://82.147.71.45/:80")
+                print(f"[DEBUG] Подключение к серверу: http://82.147.71.45:80")
                 # Подключаемся к серверу
-                self.sio.connect('http://82.147.71.45/:80', wait_timeout=10)
+                self.sio.connect('http://82.147.71.45:80', wait_timeout=10)
                 retry_count = 0  # Сбрасываем счетчик после успешного подключения
                 
                 while True:
@@ -184,7 +238,6 @@ class PingMonitor:
                     ping_results = []
                     for host, ping_time in zip(self.hosts, results):
                         if isinstance(ping_time, Exception):
-                            print(f"[ERROR] Exception for {host}: {str(ping_time)}")
                             ping_time = None
                             self.failed_hosts[host] = datetime.now()
                         
@@ -203,6 +256,17 @@ class PingMonitor:
                     except Exception as e:
                         print(f"[ERROR] Ошибка отправки данных: {str(e)}")
                         raise  # Перезапускаем соединение
+                    
+                    # Периодически проверяем хосты в черном списке
+                    # Каждые 10 циклов (или примерно каждые 10 секунд при стандартном интервале)
+                    if int(time.time()) % 10 == 0:
+                        current_time = datetime.now()
+                        for host, blacklist_time in list(self.failed_hosts.items()):
+                            # Если прошло достаточно времени, удаляем хост из черного списка
+                            if (current_time - blacklist_time).total_seconds() >= self.retry_interval:
+                                del self.failed_hosts[host]
+                                self.ping_failures[host] = 0
+                                print(f"[INFO] Хост {host} удален из черного списка, попробуем пинговать снова")
                     
                     # Вычисляем, сколько нужно подождать до следующего цикла
                     elapsed = time.time() - start_time
@@ -226,6 +290,36 @@ class PingMonitor:
             finally:
                 if self.sio.connected:
                     self.sio.disconnect()
+
+def save_config(provider_name: str, hosts: List[str]) -> None:
+    """Сохраняет конфигурацию в файл"""
+    config = {
+        "provider_name": provider_name,
+        "hosts": hosts,
+        "license_accepted": True,
+        "last_updated": datetime.now().isoformat()
+    }
+    
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"[INFO] Конфигурация сохранена в {CONFIG_FILE}")
+    except Exception as e:
+        print(f"[ERROR] Не удалось сохранить конфигурацию: {str(e)}")
+
+def load_config() -> Optional[Dict]:
+    """Загружает конфигурацию из файла"""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        print(f"[INFO] Конфигурация загружена из {CONFIG_FILE}")
+        return config
+    except Exception as e:
+        print(f"[ERROR] Не удалось загрузить конфигурацию: {str(e)}")
+        return None
 
 def show_license_agreement():
     print("\n" + "=" * 80)
@@ -306,14 +400,32 @@ def get_hosts():
     return hosts
 
 async def main():
-    # Выводим заставку в стиле Windows 95/98
-    print("\n" + "=" * 80)
-    print("Мониторинг пинга провайдеров".center(80))
-    print("Версия 1.0".center(80))
-    print("=" * 80)
     print("\nДобро пожаловать в программу мониторинга пинга!")
-    print("Эта программа работает в стиле Windows 95/98")
     
+    # Пытаемся загрузить конфигурацию
+    config = load_config()
+    
+    if config:
+        print("\nНайдена сохраненная конфигурация:")
+        print(f"Провайдер: {config['provider_name']}")
+        print(f"Хосты: {', '.join(config['hosts'])}")
+        print(f"Последнее обновление: {config['last_updated']}")
+        
+        use_config = input("\nИспользовать сохраненную конфигурацию? (да/нет): ").strip().lower()
+        
+        if use_config == 'да':
+            provider_name = config['provider_name']
+            hosts = config['hosts']
+            
+            print(f"\nНастройка загружена из конфигурации:")
+            print(f"Провайдер: {provider_name}")
+            print(f"Хосты для пинга: {', '.join(hosts)}")
+            
+            monitor = PingMonitor(provider_name, hosts)
+            await monitor.run()
+            return
+    
+    # Если нет конфигурации или пользователь отказался её использовать
     # Показываем лицензионное соглашение
     if not show_license_agreement():
         print("\nВы не приняли лицензионное соглашение. Программа будет закрыта.")
@@ -322,38 +434,18 @@ async def main():
     provider_name = get_provider_name()
     hosts = get_hosts()
     
+    # Сохраняем конфигурацию
+    save_config(provider_name, hosts)
+    
     print(f"\nНастройка завершена:")
     print(f"Провайдер: {provider_name}")
     print(f"Хосты для пинга: {', '.join(hosts)}")
     
-    # Добавляем дополнительную диагностику для проблемных хостов
-    print("\nВыполняем предварительную проверку хостов...")
-    for host in hosts:
-        try:
-            # Проверяем DNS-разрешение
-            print(f"Проверка DNS для {host}...")
-            if sys.platform == 'win32':
-                dns_process = subprocess.run(f'nslookup {host}', shell=True, capture_output=True, text=True, encoding='cp866')
-            else:
-                dns_process = subprocess.run(f'nslookup {host}', shell=True, capture_output=True, text=True)
-            
-            if dns_process.returncode != 0 or "can't find" in dns_process.stdout.lower() or "не удается найти" in dns_process.stdout.lower():
-                print(f"[ПРЕДУПРЕЖДЕНИЕ] Проблема с DNS-разрешением для {host}")
-            else:
-                print(f"DNS-разрешение для {host} успешно")
-        except Exception as e:
-            print(f"[ОШИБКА] Не удалось выполнить DNS-проверку для {host}: {str(e)}")
-    
-    print("\nЗапуск мониторинга...")
     monitor = PingMonitor(provider_name, hosts)
     await monitor.run()
 
 if __name__ == '__main__':
     try:
-        # Выводим информацию о системе
-        print(f"Операционная система: {sys.platform}")
-        print(f"Python версия: {sys.version}")
-        
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nПрограмма остановлена пользователем")
