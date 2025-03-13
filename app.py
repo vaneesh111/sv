@@ -31,6 +31,8 @@ if not os.path.exists(data_dir):
 connected_clients = {}
 # Хранение клиентов для выполнения команд
 command_clients = []
+# Хранение списков хостов для провайдеров
+provider_hosts = {}
 
 # HTML-страница для входа в админку (с оранжевым цветом)
 LOGIN_HTML = """
@@ -346,6 +348,100 @@ ADMIN_HTML = """
             border-left: 4px solid #2E7D32;
             display: none;
         }
+        .hosts-panel {
+            width: 100%;
+            max-width: 600px;
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .hosts-textarea {
+            width: 100%;
+            height: 150px;
+            padding: 10px;
+            border: 1px solid #FFB74D;
+            border-radius: 5px;
+            font-family: 'Courier New', Courier, monospace;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+        .hosts-textarea:focus {
+            outline: none;
+            border-color: #FF9800;
+            box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.2);
+        }
+        .commands-panel {
+            width: 100%;
+            max-width: 600px;
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .command-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 8px;
+            border: 1px solid #FFE0B2;
+            border-radius: 5px;
+            background-color: #FFF8E1;
+        }
+        .command-name {
+            flex: 1;
+            font-weight: bold;
+            color: #E65100;
+        }
+        .command-description {
+            flex: 2;
+            color: #555;
+            font-size: 14px;
+        }
+        .command-button {
+            background-color: #FF9800;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .command-button:hover {
+            background-color: #F57C00;
+        }
+        .tabs {
+            display: flex;
+            width: 100%;
+            max-width: 600px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #FFE0B2;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: 500;
+            color: #F57C00;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .tab:hover {
+            background-color: #FFF8E1;
+        }
+        .tab.active {
+            color: #E65100;
+            border-bottom: 3px solid #FF9800;
+            background-color: #FFF3E0;
+        }
+        .tab-content {
+            display: none;
+            width: 100%;
+        }
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -353,52 +449,137 @@ ADMIN_HTML = """
     <a href="/logout" class="logout-link">Выйти</a>
     <h1>Управление компьютерами</h1>
     
-    <div class="settings-panel">
-        <h2>Настройки пинга</h2>
-        <div id="successMessage" class="success-message">Настройки успешно применены</div>
-        
-        <div class="settings-group">
-            <label for="pingInterval">Интервал пинга (секунды):</label>
-            <input type="number" id="pingInterval" min="0.1" step="0.1" value="1.0">
-            <small style="color: #757575; display: block; margin-top: 5px;">Минимальное значение: 0.1 секунды</small>
-        </div>
-        
-        <div class="settings-group">
-            <label>Применить к:</label>
-            <select id="applyTo" style="width: 100%; padding: 8px; border: 1px solid #FFB74D; border-radius: 4px;">
-                <option value="all">Всем провайдерам</option>
-                <option value="selected">Выбранному провайдеру</option>
-            </select>
-        </div>
-        
-        <div class="settings-actions">
-            <button id="applySettings">Применить настройки</button>
-        </div>
+    <div class="tabs">
+        <div class="tab active" data-tab="clients">Клиенты</div>
+        <div class="tab" data-tab="settings">Настройки</div>
+        <div class="tab" data-tab="hosts">Хосты</div>
+        <div class="tab" data-tab="commands">Команды</div>
     </div>
     
-    <table class="client-list">
-        <thead>
-            <tr>
-                <th>Провайдер</th>
-                <th>Статус</th>
-                <th>Последний пинг</th>
-            </tr>
-        </thead>
-        <tbody id="clientList">
-            <!-- Клиенты будут добавлены динамически -->
-        </tbody>
-    </table>
-    
-    <div class="input-container">
-        <input type="text" id="commandInput" placeholder="Введите команду для выполнения">
-        <button onclick="sendCommand()">Отправить</button>
-    </div>
-    <pre id="response">[Консоль готова к работе]
+    <div class="tab-content active" id="clients-tab">
+        <table class="client-list">
+            <thead>
+                <tr>
+                    <th>Провайдер</th>
+                    <th>Статус</th>
+                    <th>Последний пинг</th>
+                </tr>
+            </thead>
+            <tbody id="clientList">
+                <!-- Клиенты будут добавлены динамически -->
+            </tbody>
+        </table>
+        
+        <div class="input-container">
+            <input type="text" id="commandInput" placeholder="Введите команду для выполнения">
+            <button onclick="sendCommand()">Отправить</button>
+        </div>
+        <pre id="response">[Консоль готова к работе]
 </pre>
+    </div>
+    
+    <div class="tab-content" id="settings-tab">
+        <div class="settings-panel">
+            <h2>Настройки пинга</h2>
+            <div id="pingSuccessMessage" class="success-message">Настройки успешно применены</div>
+            
+            <div class="settings-group">
+                <label for="pingInterval">Интервал пинга (секунды):</label>
+                <input type="number" id="pingInterval" min="0.1" step="0.1" value="1.0">
+                <small style="color: #757575; display: block; margin-top: 5px;">Минимальное значение: 0.1 секунды</small>
+            </div>
+            
+            <div class="settings-group">
+                <label>Применить к:</label>
+                <select id="applyTo" style="width: 100%; padding: 8px; border: 1px solid #FFB74D; border-radius: 4px;">
+                    <option value="all">Всем провайдерам</option>
+                    <option value="selected">Выбранному провайдеру</option>
+                </select>
+            </div>
+            
+            <div class="settings-actions">
+                <button id="applySettings">Применить настройки</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tab-content" id="hosts-tab">
+        <div class="hosts-panel">
+            <h2>Управление хостами для пинга</h2>
+            <div id="hostsSuccessMessage" class="success-message">Список хостов успешно обновлен</div>
+            
+            <div class="settings-group">
+                <label>Применить к:</label>
+                <select id="hostsApplyTo" style="width: 100%; padding: 8px; border: 1px solid #FFB74D; border-radius: 4px;">
+                    <option value="all">Всем провайдерам</option>
+                    <option value="selected">Выбранному провайдеру</option>
+                </select>
+            </div>
+            
+            <div class="settings-group">
+                <label for="hostsList">Список хостов (по одному на строку):</label>
+                <textarea id="hostsList" class="hosts-textarea" placeholder="Введите хосты для пинга, по одному на строку. Например:
+google.com
+8.8.8.8
+yandex.ru"></textarea>
+            </div>
+            
+            <div class="settings-actions">
+                <button id="applyHosts">Обновить хосты</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tab-content" id="commands-tab">
+        <div class="commands-panel">
+            <h2>Стандартные команды</h2>
+            
+            <div class="command-item">
+                <div class="command-name">ipconfig</div>
+                <div class="command-description">Показать сетевые настройки компьютера</div>
+                <button class="command-button" onclick="sendPredefinedCommand('ipconfig')">Выполнить</button>
+            </div>
+            
+            <div class="command-item">
+                <div class="command-name">systeminfo</div>
+                <div class="command-description">Показать информацию о системе</div>
+                <button class="command-button" onclick="sendPredefinedCommand('systeminfo')">Выполнить</button>
+            </div>
+            
+            <div class="command-item">
+                <div class="command-name">netstat -an</div>
+                <div class="command-description">Показать активные сетевые соединения</div>
+                <button class="command-button" onclick="sendPredefinedCommand('netstat -an')">Выполнить</button>
+            </div>
+            
+            <div class="command-item">
+                <div class="command-name">tracert google.com</div>
+                <div class="command-description">Трассировка маршрута до google.com</div>
+                <button class="command-button" onclick="sendPredefinedCommand('tracert google.com')">Выполнить</button>
+            </div>
+            
+            <div class="command-item">
+                <div class="command-name">nslookup google.com</div>
+                <div class="command-description">DNS-запрос для google.com</div>
+                <button class="command-button" onclick="sendPredefinedCommand('nslookup google.com')">Выполнить</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         var socket = io();
         var selectedProvider = null;
+        
+        // Переключение вкладок
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                
+                this.classList.add('active');
+                document.getElementById(this.dataset.tab + '-tab').classList.add('active');
+            });
+        });
         
         socket.on('connect', function() {
             console.log('Connected to server');
@@ -470,8 +651,12 @@ ADMIN_HTML = """
             
             // Автоматически переключаем на "Выбранному провайдеру"
             document.getElementById('applyTo').value = 'selected';
+            document.getElementById('hostsApplyTo').value = 'selected';
             
             console.log('Выбран провайдер:', provider);
+            
+            // Запрашиваем список хостов для выбранного провайдера
+            socket.emit('get_provider_hosts', { provider: provider });
         }
         
         function sendCommand() {
@@ -483,6 +668,14 @@ ADMIN_HTML = """
             }
         }
         
+        function sendPredefinedCommand(command) {
+            socket.emit('admin_command', command);
+            document.getElementById('response').innerText += `[${new Date().toLocaleTimeString()}] > ${command}\\n`;
+            
+            // Переключаемся на вкладку клиентов для просмотра результата
+            document.querySelector('.tab[data-tab="clients"]').click();
+        }
+        
         // Отправка команды по нажатию Enter
         document.getElementById('commandInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
@@ -490,7 +683,7 @@ ADMIN_HTML = """
             }
         });
         
-        // Обработчик кнопки применения настроек
+        // Обработчик кнопки применения настроек пинга
         document.getElementById('applySettings').addEventListener('click', function() {
             var pingInterval = parseFloat(document.getElementById('pingInterval').value);
             var applyTo = document.getElementById('applyTo').value;
@@ -512,7 +705,7 @@ ADMIN_HTML = """
             });
             
             // Показываем сообщение об успехе
-            var successMessage = document.getElementById('successMessage');
+            var successMessage = document.getElementById('pingSuccessMessage');
             successMessage.style.display = 'block';
             successMessage.textContent = `Интервал пинга (${pingInterval} сек) успешно применен к ${applyTo === 'selected' ? 'провайдеру ' + selectedProvider : 'всем провайдерам'}`;
             
@@ -520,6 +713,49 @@ ADMIN_HTML = """
             setTimeout(function() {
                 successMessage.style.display = 'none';
             }, 3000);
+        });
+        
+        // Обработчик кнопки обновления хостов
+        document.getElementById('applyHosts').addEventListener('click', function() {
+            var hostsText = document.getElementById('hostsList').value.trim();
+            var applyTo = document.getElementById('hostsApplyTo').value;
+            
+            if (!hostsText) {
+                alert('Пожалуйста, введите хотя бы один хост');
+                return;
+            }
+            
+            if (applyTo === 'selected' && !selectedProvider) {
+                alert('Пожалуйста, выберите провайдера из списка');
+                return;
+            }
+            
+            // Разбиваем текст на строки и удаляем пустые строки
+            var hosts = hostsText.split('\\n').map(h => h.trim()).filter(h => h);
+            
+            // Отправляем список хостов на сервер
+            socket.emit('update_hosts', {
+                hosts: hosts,
+                provider: applyTo === 'selected' ? selectedProvider : 'all'
+            });
+            
+            // Показываем сообщение об успехе
+            var successMessage = document.getElementById('hostsSuccessMessage');
+            successMessage.style.display = 'block';
+            successMessage.textContent = `Список хостов (${hosts.length} шт.) успешно обновлен для ${applyTo === 'selected' ? 'провайдера ' + selectedProvider : 'всех провайдеров'}`;
+            
+            // Скрываем сообщение через 3 секунды
+            setTimeout(function() {
+                successMessage.style.display = 'none';
+            }, 3000);
+        });
+        
+        // Обработчик получения списка хостов для провайдера
+        socket.on('provider_hosts', function(data) {
+            if (data.provider === selectedProvider) {
+                var hostsTextarea = document.getElementById('hostsList');
+                hostsTextarea.value = data.hosts.join('\\n');
+            }
         });
         
         // Обновляем список клиентов каждые 10 секунд
@@ -706,11 +942,125 @@ def handle_update_ping_interval(data):
     except Exception as e:
         print(f"[ERROR] Ошибка при обновлении интервала пинга: {str(e)}")
 
+@socketio.on('update_hosts')
+def handle_update_hosts(data):
+    # Проверяем, что запрос отправлен аутентифицированным пользователем
+    if not session.get('authenticated'):
+        return
+    
+    hosts = data.get('hosts', [])
+    provider = data.get('provider', 'all')
+    
+    try:
+        if not hosts:
+            print(f"[ERROR] Получен пустой список хостов")
+            return
+        
+        print(f"[DEBUG] Обновление списка хостов для {provider}: {', '.join(hosts)}")
+        
+        # Сохраняем список хостов
+        if provider == 'all':
+            # Обновляем для всех провайдеров
+            for client_provider, client_data in connected_clients.items():
+                provider_hosts[client_provider] = hosts
+                socketio.emit('update_hosts', {'hosts': hosts}, room=client_data['sid'])
+                print(f"[DEBUG] Отправлен обновленный список хостов для {client_provider}")
+        else:
+            # Обновляем только для выбранного провайдера
+            if provider in connected_clients:
+                provider_hosts[provider] = hosts
+                socketio.emit('update_hosts', {'hosts': hosts}, room=connected_clients[provider]['sid'])
+                print(f"[DEBUG] Отправлен обновленный список хостов для {provider}")
+            else:
+                print(f"[ERROR] Провайдер не найден: {provider}")
+    
+    except Exception as e:
+        print(f"[ERROR] Ошибка при обновлении списка хостов: {str(e)}")
+
+@socketio.on('get_provider_hosts')
+def handle_get_provider_hosts(data):
+    # Проверяем, что запрос отправлен аутентифицированным пользователем
+    if not session.get('authenticated'):
+        return
+    
+    provider = data.get('provider')
+    
+    if provider:
+        hosts = provider_hosts.get(provider, [])
+        emit('provider_hosts', {'provider': provider, 'hosts': hosts})
+
 @socketio.on('command_result')
 def handle_command_result(result):
     print(f"[DEBUG] Command result received: {result}")
     # Отправляем результат выполнения команды всем админам
     socketio.emit('command_result', result)
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <title>Ошибка доступа</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #fff3e0;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+            }
+            .error-container {
+                background-color: white;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 2px 15px rgba(255, 152, 0, 0.3);
+                width: 100%;
+                max-width: 500px;
+                border-top: 4px solid #FF9800;
+                text-align: center;
+            }
+            h1 {
+                color: #E65100;
+                font-size: 24px;
+                margin-bottom: 20px;
+            }
+            p {
+                color: #555;
+                margin-bottom: 15px;
+                line-height: 1.5;
+            }
+            .back-link {
+                display: inline-block;
+                margin-top: 20px;
+                color: #FF9800;
+                text-decoration: none;
+                font-weight: bold;
+                padding: 10px 20px;
+                border: 2px solid #FF9800;
+                border-radius: 5px;
+                transition: all 0.3s;
+            }
+            .back-link:hover {
+                background-color: #FF9800;
+                color: white;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <h1>Ошибка доступа к странице</h1>
+            <p>Метод запроса не разрешен для запрашиваемого URL.</p>
+            <p>Пожалуйста, проверьте правильность URL или вернитесь на главную страницу.</p>
+            <a href="/" class="back-link">Вернуться на главную</a>
+        </div>
+    </body>
+    </html>
+    """), 405
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=80, debug=True, use_reloader=False)
