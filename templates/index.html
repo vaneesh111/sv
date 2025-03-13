@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Мониторинг пинга провайдеров</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            position: relative;
+        }
+        .admin-link {
+            position: absolute;
+            right: 0;
+            top: 0;
+            background-color: #FF5722;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: normal;
+            transition: background-color 0.3s;
+        }
+        .admin-link:hover {
+            background-color: #E64A19;
+        }
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+        .tab {
+            padding: 12px 24px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        .tab:hover {
+            background-color: #f0f0f0;
+        }
+        .tab.active {
+            background-color: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .controls {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 15px;
+            border-radius: 20px;
+            background-color: #f8f8f8;
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .legend-item:hover {
+            transform: scale(1.05);
+        }
+        .legend-item.hidden {
+            opacity: 0.5;
+            text-decoration: line-through;
+        }
+        .legend-color {
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+            border-radius: 6px;
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            margin-top: 15px;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        select, input[type="date"] {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        button {
+            padding: 8px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .chart-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            height: 500px;
+        }
+        .site-separator {
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #333;
+            padding: 8px;
+            background-color: #f0f0f0;
+            border-radius: 6px;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            .filters {
+                flex-direction: column;
+            }
+            .filter-group {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>
+        Мониторинг пинга провайдеров
+        <a href="/admin" class="admin-link">Панель администратора</a>
+    </h1>
+    
+    <div class="tabs">
+        <div class="tab active" data-tab="comparison">Сравнение провайдеров</div>
+        <div class="tab" data-tab="timeline">График по времени</div>
+    </div>
+    
+    <div class="tab-content active" id="comparison-tab">
+        <div class="chart-container">
+            <canvas id="globalChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="tab-content" id="timeline-tab">
+        <div class="controls">
+            <div class="legend" id="providerLegend">
+                <!-- Legend items will be dynamically generated -->
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="hostSelect">Хост:</label>
+                    <select id="hostSelect"></select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="providerSelect">Провайдер:</label>
+                    <select id="providerSelect"></select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="dateSelect">Дата:</label>
+                    <input type="date" id="dateSelect">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="groupByHost">Группировать по сайтам:</label>
+                    <input type="checkbox" id="groupByHost" checked>
+                </div>
+                
+                <button id="applyFilters">Применить</button>
+            </div>
+        </div>
+        
+        <div id="timelineCharts">
+            <!-- Charts will be dynamically generated here when grouping by host -->
+        </div>
+        
+        <div class="chart-container" id="mainTimelineContainer">
+            <canvas id="timelineChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let globalLabels = [];
+        const providers = new Set();
+        let pingData = [];
+        let hiddenProviders = new Set();
+        let isUpdating = false;
+        let lastScrollPosition = 0;
+        let chartTooltip = null;
+        
+        // Provider color mapping - фиксированные цвета для провайдеров
+        function getProviderColor(providerName) {
+            const normalizedName = providerName.toUpperCase();
+            
+            if (normalizedName.includes('DSI') || normalizedName.includes('ДСИ')) {
+                return {
+                    backgroundColor: 'rgba(255, 235, 59, 0.7)',
+                    borderColor: '#FFEB3B'
+                };
+            } else if (normalizedName.includes('BASE') || normalizedName.includes('БАЗЕ')) {
+                return {
+                    backgroundColor: 'rgba(33, 150, 243, 0.7)',
+                    borderColor: '#2196F3'
+                };
+            } else if (normalizedName.includes('ROSTELEKOM') || normalizedName.includes('РОСТЕЛЕКОМ')) {
+                return {
+                    backgroundColor: 'rgba(156, 39, 176, 0.7)',
+                    borderColor: '#9C27B0'
+                };
+            } else if (normalizedName.includes('DOMRU') || normalizedName.includes('ДОМ.РУ') || normalizedName.includes('ДОМ РУ')) {
+                return {
+                    backgroundColor: 'rgba(255, 64, 129, 0.7)',
+                    borderColor: '#FF4081'
+                };
+            } else if (normalizedName.includes('RAKETA') || normalizedName.includes('РАКЕТА')) {
+                return {
+                    backgroundColor: 'rgba(255, 87, 34, 0.7)',
+                    borderColor: '#FF5722'
+                };
+            } else {
+                const hash = Array.from(normalizedName).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                const hue = hash % 360;
+                return {
+                    backgroundColor: `hsla(${hue}, 70%, 60%, 0.7)`,
+                    borderColor: `hsl(${hue}, 70%, 50%)`
+                };
+            }
+        }
+
+        // Initialize comparison chart
+        const ctxComparison = document.getElementById('globalChart').getContext('2d');
+        const globalChart = new Chart(ctxComparison, {
+            type: 'bar',
+            data: {
+                labels: globalLabels,
+                datasets: []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 200,
+                        ticks: {
+                            callback: function(value) {
+                                return value + ' мс';
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Сравнение пинга провайдеров по сайтам'
+                    }
+                }
+            }
+        });
+        
+        // Initialize timeline chart
+        const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
+        const timelineChart = new Chart(ctxTimeline, {
+            type: 'line',
+            data: {
+                datasets: []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            tooltipFormat: 'DD.MM.YYYY HH:mm:ss',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Время'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Пинг (мс)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value + ' мс';
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    },
+                    title: {
+                        display: true,
+                        text: 'История пинга по времени'
+                    }
+                }
+            }
+        });
+        
+        // Store chart instances for per-host charts
+        const hostCharts = {};
+        
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                
+                this.classList.add('active');
+                document.getElementById(`${this.dataset.tab}-tab`).classList.add('active');
+            });
+        });
+        
+        // Apply filters button
+        document.getElementById('applyFilters').addEventListener('click', function() {
+            isUpdating = true;
+            // Сохраняем текущую позицию прокрутки
+            const scrollPosition = window.scrollY;
+            
+            updateTimelineChart();
+            
+            // Восстанавливаем позицию прокрутки после обновления
+            setTimeout(() => {
+                window.scrollTo(0, scrollPosition);
+                isUpdating = false;
+            }, 100);
+        });
+        
+        // Group by host checkbox
+        document.getElementById('groupByHost').addEventListener('change', function() {
+            isUpdating = true;
+            // Сохраняем текущую позицию прокрутки
+            const scrollPosition = window.scrollY;
+            
+            updateTimelineChart();
+            
+            // Восстанавливаем позицию прокрутки после обновления
+            setTimeout(() => {
+                window.scrollTo(0, scrollPosition);
+                isUpdating = false;
+            }, 100);
+        });
+        
+        // Set default date to today
+        const today = new Date();
+        const dateInput = document.getElementById('dateSelect');
+        dateInput.valueAsDate = today;
+        
+        // Предотвращаем автоматическую прокрутку при обновлении данных
+        window.addEventListener('scroll', function() {
+            if (!isUpdating) {
+                // Сохраняем позицию прокрутки только если не происходит обновление
+                localStorage.setItem('scrollPosition', window.scrollY);
+            }
+        });
+        
+        // Load historical data
+        fetch('/get_history')
+            .then(response => response.json())
+            .then(data => {
+                pingData = data;
+                updateFilters();
+                updateProviderLegend();
+                
+                isUpdating = true;
+                updateTimelineChart();
+                
+                // Восстанавливаем позицию прокрутки после загрузки данных
+                setTimeout(() => {
+                    const savedPosition = localStorage.getItem('scrollPosition');
+                    if (savedPosition) {
+                        window.scrollTo(0, parseInt(savedPosition));
+                    }
+                    isUpdating = false;
+                }, 200);
+            });
+        
+        function updateFilters() {
+            const hostSelect = document.getElementById('hostSelect');
+            const providerSelect = document.getElementById('providerSelect');
+            
+            const hosts = new Set();
+            const providers = new Set();
+            
+            pingData.forEach(entry => {
+                providers.add(entry.provider);
+                entry.ping_results.forEach(result => {
+                    hosts.add(result.host);
+                });
+            });
+            
+            hostSelect.innerHTML = '<option value="all">Все хосты</option>';
+            Array.from(hosts).sort().forEach(host => {
+                hostSelect.appendChild(new Option(host, host));
+            });
+            
+            providerSelect.innerHTML = '<option value="all">Все провайдеры</option>';
+            Array.from(providers).sort().forEach(provider => {
+                providerSelect.appendChild(new Option(provider, provider));
+            });
+        }
+        
+        function updateProviderLegend() {
+            const legendContainer = document.getElementById('providerLegend');
+            legendContainer.innerHTML = '';
+            
+            const uniqueProviders = new Set();
+            pingData.forEach(entry => uniqueProviders.add(entry.provider));
+            
+            Array.from(uniqueProviders).sort().forEach(provider => {
+                const colors = getProviderColor(provider);
+                const legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+                legendItem.dataset.provider = provider;
+                
+                if (hiddenProviders.has(provider)) {
+                    legendItem.classList.add('hidden');
+                }
+                
+                legendItem.innerHTML = `
+                    <div class="legend-color" style="background-color: ${colors.borderColor};"></div>
+                    <span>${provider}</span>
+                `;
+                
+                legendItem.addEventListener('click', function() {
+                    const provider = this.dataset.provider;
+                    
+                    if (hiddenProviders.has(provider)) {
+                        hiddenProviders.delete(provider);
+                        this.classList.remove('hidden');
+                    } else {
+                        hiddenProviders.add(provider);
+                        this.classList.add('hidden');
+                    }
+                    
+                    // Persist hidden providers in localStorage
+                    localStorage.setItem('hiddenProviders', JSON.stringify(Array.from(hiddenProviders)));
+                    
+                    // Сохраняем позицию прокрутки перед обновлением
+                    isUpdating = true;
+                    const scrollPosition = window.scrollY;
+                    
+                    updateTimelineChart();
+                    
+                    // Восстанавливаем позицию прокрутки после обновления
+                    setTimeout(() => {
+                        window.scrollTo(0, scrollPosition);
+                        isUpdating = false;
+                    }, 100);
+                });
+                
+                legendContainer.appendChild(legendItem);
+            });
+        }
+        
+        // Load hidden providers from localStorage
+        function loadHiddenProviders() {
+            try {
+                const saved = localStorage.getItem('hiddenProviders');
+                if (saved) {
+                    hiddenProviders = new Set(JSON.parse(saved));
+                }
+            } catch (e) {
+                console.error('Error loading hidden providers:', e);
+                hiddenProviders = new Set();
+            }
+        }
+        
+        // Call this on page load
+        loadHiddenProviders();
+        
+        function updateTimelineChart() {
+            const selectedHost = document.getElementById('hostSelect').value;
+            const selectedProvider = document.getElementById('providerSelect').value;
+            const selectedDate = document.getElementById('dateSelect').value;
+            const groupByHost = document.getElementById('groupByHost').checked;
+            
+            const startDate = new Date(selectedDate);
+            startDate.setHours(0, 0, 0, 0);
+            
+            const endDate = new Date(selectedDate);
+            endDate.setHours(23, 59, 59, 999);
+            
+            // Сохраняем текущее состояние графиков
+            const currentChartStates = saveChartStates();
+            
+            // Clear existing host charts
+            document.getElementById('timelineCharts').innerHTML = '';
+            Object.keys(hostCharts).forEach(key => {
+                if (hostCharts[key]) {
+                    hostCharts[key].destroy();
+                    delete hostCharts[key];
+                }
+            });
+            
+            if (groupByHost) {
+                document.getElementById('mainTimelineContainer').style.display = 'none';
+                createHostCharts(startDate, endDate, selectedHost, selectedProvider);
+            } else {
+                document.getElementById('mainTimelineContainer').style.display = 'block';
+                createSingleChart(startDate, endDate, selectedHost, selectedProvider);
+            }
+
+            // Восстанавливаем состояние графиков
+            restoreChartStates(currentChartStates);
+        }
+
+        // Функция для сохранения состояния графиков
+        function saveChartStates() {
+            const states = {};
+            if (timelineChart) {
+                states.timelineChart = {
+                    tooltip: timelineChart.tooltip,
+                    zoom: timelineChart.getZoomLevel ? timelineChart.getZoomLevel() : null,
+                    pan: timelineChart.getPan ? timelineChart.getPan() : null
+                };
+            }
+            Object.keys(hostCharts).forEach(key => {
+                if (hostCharts[key]) {
+                    states[key] = {
+                        tooltip: hostCharts[key].tooltip,
+                        zoom: hostCharts[key].getZoomLevel ? hostCharts[key].getZoomLevel() : null,
+                        pan: hostCharts[key].getPan ? hostCharts[key].getPan() : null
+                    };
+                }
+            });
+            return states;
+        }
+
+        // Функция для восстановления состояния графиков
+        function restoreChartStates(states) {
+            if (states.timelineChart && timelineChart) {
+                timelineChart.tooltip = states.timelineChart.tooltip;
+                if (timelineChart.setZoomLevel && states.timelineChart.zoom) {
+                    timelineChart.setZoomLevel(states.timelineChart.zoom);
+                }
+                if (timelineChart.setPan && states.timelineChart.pan) {
+                    timelineChart.setPan(states.timelineChart.pan);
+                }
+            }
+            Object.keys(hostCharts).forEach(key => {
+                if (states[key] && hostCharts[key]) {
+                    hostCharts[key].tooltip = states[key].tooltip;
+                    if (hostCharts[key].setZoomLevel && states[key].zoom) {
+                        hostCharts[key].setZoomLevel(states[key].zoom);
+                    }
+                    if (hostCharts[key].setPan && states[key].pan) {
+                        hostCharts[key].setPan(states[key].pan);
+                    }
+                }
+            });
+        }
+
+        // Модифицируем обработчик событий прокрутки
+        window.addEventListener('scroll', function() {
+            lastScrollPosition = window.scrollY;
+        });
+        
+        function createHostCharts(startDate, endDate, selectedHost, selectedProvider) {
+            const chartsContainer = document.getElementById('timelineCharts');
+            const hosts = new Set();
+            
+            // Collect all hosts that match the filter
+            pingData.forEach(entry => {
+                if ((selectedProvider === 'all' || entry.provider === selectedProvider) && 
+                    !hiddenProviders.has(entry.provider)) {
+                    const timestamp = new Date(entry.timestamp);
+                    if (timestamp >= startDate && timestamp <= endDate) {
+                        entry.ping_results.forEach(result => {
+                            if (selectedHost === 'all' || result.host === selectedHost) {
+                                hosts.add(result.host);
+                            }
+                        });
+                    }
+                }
+            });
+            
+            // Create a chart for each host
+            Array.from(hosts).sort().forEach(host => {
+                const chartContainer = document.createElement('div');
+                chartContainer.className = 'chart-container';
+                chartContainer.style.height = '300px';
+                
+                const siteHeader = document.createElement('div');
+                siteHeader.className = 'site-separator';
+                siteHeader.textContent = host;
+                
+                const canvas = document.createElement('canvas');
+                canvas.id = `chart-${host.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                
+                chartsContainer.appendChild(siteHeader);
+                chartContainer.appendChild(canvas);
+                chartsContainer.appendChild(chartContainer);
+                
+                const ctx = canvas.getContext('2d');
+                const chartData = prepareChartData(host, startDate, endDate, selectedProvider);
+                
+                hostCharts[host] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: chartData
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    tooltipFormat: 'DD.MM.YYYY HH:mm:ss',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Время'
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Пинг (мс)'
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                        return value + ' мс';
+                                    }
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: `Пинг для ${host}`
+                            }
+                        }
+                    }
+                });
+            });
+        }
+        
+        function createSingleChart(startDate, endDate, selectedHost, selectedProvider) {
+            const chartData = [];
+            
+            if (selectedHost === 'all') {
+                // If all hosts are selected, we need to create datasets for each provider-host combination
+                const providerHostData = {};
+                
+                pingData.forEach(entry => {
+                    const timestamp = new Date(entry.timestamp);
+                    if (timestamp >= startDate && timestamp <= endDate &&
+                        (selectedProvider === 'all' || entry.provider === selectedProvider) &&
+                        !hiddenProviders.has(entry.provider)) {
+                        
+                        entry.ping_results.forEach(result => {
+                            if (result.ping !== null) {
+                                const key = `${entry.provider} - ${result.host}`;
+                                if (!providerHostData[key]) {
+                                    const colors = getProviderColor(entry.provider);
+                                    providerHostData[key] = {
+                                        label: key,
+                                        data: [],
+                                        borderColor: colors.borderColor,
+                                        backgroundColor: colors.backgroundColor,
+                                        fill: false,
+                                        tension: 0.1,
+                                        pointRadius: 2
+                                    };
+                                }
+                                providerHostData[key].data.push({
+                                    x: timestamp,
+                                    y: result.ping
+                                });
+                            }
+                        });
+                    }
+                });
+                
+                // Convert to array and sort data points
+                Object.values(providerHostData).forEach(dataset => {
+                    dataset.data.sort((a, b) => a.x - b.x);
+                    chartData.push(dataset);
+                });
+            } else {
+                // If a specific host is selected, create datasets for each provider
+                const providerData = {};
+                
+                pingData.forEach(entry => {
+                    const timestamp = new Date(entry.timestamp);
+                    if (timestamp >= startDate && timestamp <= endDate &&
+                        (selectedProvider === 'all' || entry.provider === selectedProvider) &&
+                        !hiddenProviders.has(entry.provider)) {
+                        
+                        entry.ping_results.forEach(result => {
+                            if (result.host === selectedHost && result.ping !== null) {
+                                if (!providerData[entry.provider]) {
+                                    const colors = getProviderColor(entry.provider);
+                                    providerData[entry.provider] = {
+                                        label: entry.provider,
+                                        data: [],
+                                        borderColor: colors.borderColor,
+                                        backgroundColor: colors.backgroundColor,
+                                        fill: false,
+                                        tension: 0.1,
+                                        pointRadius: 2
+                                    };
+                                }
+                                providerData[entry.provider].data.push({
+                                    x: timestamp,
+                                    y: result.ping
+                                });
+                            }
+                        });
+                    }
+                });
+                
+                // Convert to array and sort data points
+                Object.values(providerData).forEach(dataset => {
+                    dataset.data.sort((a, b) => a.x - b.x);
+                    chartData.push(dataset);
+                });
+            }
+            
+            // Update the chart
+            timelineChart.data.datasets = chartData;
+            
+            // Set chart title
+            const formattedDate = new Date(selectedDate).toLocaleDateString('ru-RU');
+            let titleText = `История пинга за ${formattedDate}`;
+            if (selectedHost !== 'all') {
+                titleText += ` - ${selectedHost}`;
+            }
+            if (selectedProvider !== 'all') {
+                titleText += ` (${selectedProvider})`;
+            }
+            timelineChart.options.plugins.title.text = titleText;
+            
+            timelineChart.update();
+        }
+        
+        function prepareChartData(host, startDate, endDate, selectedProvider) {
+            const providerData = {};
+            
+            pingData.forEach(entry => {
+                const timestamp = new Date(entry.timestamp);
+                if (timestamp >= startDate && timestamp <= endDate &&
+                    (selectedProvider === 'all' || entry.provider === selectedProvider) &&
+                    !hiddenProviders.has(entry.provider)) {
+                    
+                    entry.ping_results.forEach(result => {
+                        if (result.host === host && result.ping !== null) {
+                            if (!providerData[entry.provider]) {
+                                const colors = getProviderColor(entry.provider);
+                                providerData[entry.provider] = {
+                                    label: entry.provider,
+                                    data: [],
+                                    borderColor: colors.borderColor,
+                                    backgroundColor: colors.backgroundColor,
+                                    fill: false,
+                                    tension: 0.1,
+                                    pointRadius: 2
+                                };
+                            }
+                            providerData[entry.provider].data.push({
+                                x: timestamp,
+                                y: result.ping
+                            });
+                        }
+                    });
+                }
+            });
+            
+            // Convert to array and sort data points
+            return Object.values(providerData).map(dataset => {
+                dataset.data.sort((a, b) => a.x - b.x);
+                return dataset;
+            });
+        }
+
+        // Модифицируем функцию обновления данных в реальном времени
+        socket.on('update_chart', function(data) {
+            const providerName = data.provider;
+            const pingResults = data.ping_results;
+            
+            pingData.push(data);
+            providers.add(providerName);
+            updateFilters();
+            updateProviderLegend();
+            
+            // Обновляем график сравнения
+            updateComparisonChart(providerName, pingResults);
+            
+            // Обновляем график по времени, если он активен и соответствует фильтрам
+            if (document.querySelector('.tab[data-tab="timeline"]').classList.contains('active')) {
+                const selectedDate = document.getElementById('dateSelect').value;
+                const currentDate = new Date().toISOString().split('T')[0];
+                
+                if (selectedDate === currentDate) {
+                    updateTimelineChart();
+                }
+            }
+        });
+
+        function updateComparisonChart(providerName, pingResults) {
+            let needUpdateLabels = false;
+            pingResults.forEach(result => {
+                if (!globalLabels.includes(result.host)) {
+                    globalLabels.push(result.host);
+                    needUpdateLabels = true;
+                }
+            });
+
+            if (needUpdateLabels) {
+                globalChart.data.labels = globalLabels;
+                globalChart.data.datasets.forEach(dataset => {
+                    while (dataset.data.length < globalLabels.length) {
+                        dataset.data.push(null);
+                    }
+                });
+            }
+
+            let dataset = globalChart.data.datasets.find(d => d.label === providerName);
+            if (!dataset) {
+                const colors = getProviderColor(providerName);
+                dataset = {
+                    label: providerName,
+                    data: new Array(globalLabels.length).fill(null),
+                    backgroundColor: colors.backgroundColor,
+                    borderColor: colors.borderColor,
+                    borderWidth: 1
+                };
+                globalChart.data.datasets.push(dataset);
+            }
+
+            pingResults.forEach(result => {
+                const index = globalLabels.indexOf(result.host);
+                dataset.data[index] = result.ping;
+            });
+
+            globalChart.update();
+        }
+
+        // Добавляем обработчики событий для сохранения состояния выпадающих списков
+        document.getElementById('hostSelect').addEventListener('change', function() {
+            localStorage.setItem('selectedHost', this.value);
+        });
+
+        document.getElementById('providerSelect').addEventListener('change', function() {
+            localStorage.setItem('selectedProvider', this.value);
+        });
+
+        document.getElementById('dateSelect').addEventListener('change', function() {
+            localStorage.setItem('selectedDate', this.value);
+        });
+
+        document.getElementById('groupByHost').addEventListener('change', function() {
+            localStorage.setItem('groupByHost', this.checked);
+        });
+
+        // Восстанавливаем состояние выпадающих списков при загрузке страницы
+        window.addEventListener('load', function() {
+            const selectedHost = localStorage.getItem('selectedHost');
+            const selectedProvider = localStorage.getItem('selectedProvider');
+            const selectedDate = localStorage.getItem('selectedDate');
+            const groupByHost = localStorage.getItem('groupByHost');
+
+            if (selectedHost) document.getElementById('hostSelect').value = selectedHost;
+            if (selectedProvider) document.getElementById('providerSelect').value = selectedProvider;
+            if (selectedDate) document.getElementById('dateSelect').value = selectedDate;
+            if (groupByHost !== null) document.getElementById('groupByHost').checked = groupByHost === 'true';
+        });
+    </script>
+</body>
+</html>
+
