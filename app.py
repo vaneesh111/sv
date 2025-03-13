@@ -155,7 +155,7 @@ LOGIN_HTML = """
 </html>
 """
 
-# HTML-страница для управления командами (с оранжевыми акцентами)
+# HTML-страница для управления командами (с оранжевыми акцентами и настройкой интервала пинга)
 ADMIN_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -283,12 +283,98 @@ ADMIN_HTML = """
             background-color: #D32F2F;
             color: white;
         }
+        .settings-panel {
+            width: 100%;
+            max-width: 600px;
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .settings-panel h2 {
+            color: #E65100;
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #FFE0B2;
+            padding-bottom: 8px;
+        }
+        .settings-group {
+            margin-bottom: 15px;
+        }
+        .settings-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #F57C00;
+        }
+        .settings-group input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #FFB74D;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        .settings-group input[type="number"]:focus {
+            outline: none;
+            border-color: #FF9800;
+            box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.2);
+        }
+        .settings-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .provider-row {
+            cursor: pointer;
+        }
+        .provider-row:hover {
+            background-color: #FFF8E1;
+        }
+        .provider-row.selected {
+            background-color: #FFF3E0;
+            border-left: 3px solid #FF9800;
+        }
+        .success-message {
+            background-color: #E8F5E9;
+            color: #2E7D32;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2E7D32;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <a href="/" class="back-link">← Вернуться на главную</a>
     <a href="/logout" class="logout-link">Выйти</a>
     <h1>Управление компьютерами</h1>
+    
+    <div class="settings-panel">
+        <h2>Настройки пинга</h2>
+        <div id="successMessage" class="success-message">Настройки успешно применены</div>
+        
+        <div class="settings-group">
+            <label for="pingInterval">Интервал пинга (секунды):</label>
+            <input type="number" id="pingInterval" min="0.1" step="0.1" value="1.0">
+            <small style="color: #757575; display: block; margin-top: 5px;">Минимальное значение: 0.1 секунды</small>
+        </div>
+        
+        <div class="settings-group">
+            <label>Применить к:</label>
+            <select id="applyTo" style="width: 100%; padding: 8px; border: 1px solid #FFB74D; border-radius: 4px;">
+                <option value="all">Всем провайдерам</option>
+                <option value="selected">Выбранному провайдеру</option>
+            </select>
+        </div>
+        
+        <div class="settings-actions">
+            <button id="applySettings">Применить настройки</button>
+        </div>
+    </div>
     
     <table class="client-list">
         <thead>
@@ -312,6 +398,7 @@ ADMIN_HTML = """
 
     <script>
         var socket = io();
+        var selectedProvider = null;
         
         socket.on('connect', function() {
             console.log('Connected to server');
@@ -341,6 +428,12 @@ ADMIN_HTML = """
             for (var provider in clients) {
                 var client = clients[provider];
                 var row = document.createElement('tr');
+                row.className = 'provider-row';
+                row.dataset.provider = provider;
+                
+                if (selectedProvider === provider) {
+                    row.classList.add('selected');
+                }
                 
                 var lastPingTime = new Date(client.last_ping);
                 var now = new Date();
@@ -354,8 +447,31 @@ ADMIN_HTML = """
                     <td>${lastPingTime.toLocaleString()}</td>
                 `;
                 
+                row.addEventListener('click', function() {
+                    var provider = this.dataset.provider;
+                    selectProvider(provider);
+                });
+                
                 clientList.appendChild(row);
             }
+        }
+        
+        function selectProvider(provider) {
+            selectedProvider = provider;
+            
+            // Обновляем выделение в таблице
+            document.querySelectorAll('.provider-row').forEach(function(row) {
+                if (row.dataset.provider === provider) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+            
+            // Автоматически переключаем на "Выбранному провайдеру"
+            document.getElementById('applyTo').value = 'selected';
+            
+            console.log('Выбран провайдер:', provider);
         }
         
         function sendCommand() {
@@ -372,6 +488,38 @@ ADMIN_HTML = """
             if (e.key === 'Enter') {
                 sendCommand();
             }
+        });
+        
+        // Обработчик кнопки применения настроек
+        document.getElementById('applySettings').addEventListener('click', function() {
+            var pingInterval = parseFloat(document.getElementById('pingInterval').value);
+            var applyTo = document.getElementById('applyTo').value;
+            
+            if (isNaN(pingInterval) || pingInterval < 0.1) {
+                alert('Пожалуйста, введите корректный интервал пинга (минимум 0.1 секунды)');
+                return;
+            }
+            
+            if (applyTo === 'selected' && !selectedProvider) {
+                alert('Пожалуйста, выберите провайдера из списка');
+                return;
+            }
+            
+            // Отправляем настройки на сервер
+            socket.emit('update_ping_interval', {
+                interval: pingInterval,
+                provider: applyTo === 'selected' ? selectedProvider : 'all'
+            });
+            
+            // Показываем сообщение об успехе
+            var successMessage = document.getElementById('successMessage');
+            successMessage.style.display = 'block';
+            successMessage.textContent = `Интервал пинга (${pingInterval} сек) успешно применен к ${applyTo === 'selected' ? 'провайдеру ' + selectedProvider : 'всем провайдерам'}`;
+            
+            // Скрываем сообщение через 3 секунды
+            setTimeout(function() {
+                successMessage.style.display = 'none';
+            }, 3000);
         });
         
         // Обновляем список клиентов каждые 10 секунд
@@ -523,6 +671,40 @@ def handle_admin_command(command):
     # Отправляем команду всем подключенным клиентам для выполнения команд
     for client_sid in command_clients:
         socketio.emit('execute', command, room=client_sid)
+
+@socketio.on('update_ping_interval')
+def handle_update_ping_interval(data):
+    # Проверяем, что запрос отправлен аутентифицированным пользователем
+    if not session.get('authenticated'):
+        return
+    
+    interval = data.get('interval', 1.0)
+    provider = data.get('provider', 'all')
+    
+    try:
+        interval = float(interval)
+        if interval < 0.1:
+            print(f"[ERROR] Некорректный интервал пинга: {interval}")
+            return
+        
+        print(f"[DEBUG] Обновление интервала пинга: {interval} сек для {provider}")
+        
+        # Отправляем обновление интервала клиентам
+        if provider == 'all':
+            # Отправляем всем клиентам
+            for client_provider, client_data in connected_clients.items():
+                socketio.emit('update_interval', {'interval': interval}, room=client_data['sid'])
+                print(f"[DEBUG] Отправлено обновление интервала для {client_provider}: {interval} сек")
+        else:
+            # Отправляем только выбранному провайдеру
+            if provider in connected_clients:
+                socketio.emit('update_interval', {'interval': interval}, room=connected_clients[provider]['sid'])
+                print(f"[DEBUG] Отправлено обновление интервала для {provider}: {interval} сек")
+            else:
+                print(f"[ERROR] Провайдер не найден: {provider}")
+    
+    except Exception as e:
+        print(f"[ERROR] Ошибка при обновлении интервала пинга: {str(e)}")
 
 @socketio.on('command_result')
 def handle_command_result(result):
