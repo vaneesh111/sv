@@ -1,6 +1,7 @@
 import socketio
 import subprocess
 import sys
+import requests
 import asyncio
 import re
 import time
@@ -154,9 +155,9 @@ class PingMonitor:
 
         while retry_count < max_retries:
             try:
-                print(f"[DEBUG] Подключение к серверу: http://localhost:80")
+                print(f"[DEBUG] Подключение к серверу: http://82.147.71.45:80")
                 # Подключаемся к серверу
-                self.sio.connect('http://localhost:80', wait_timeout=10)
+                self.sio.connect('http://82.147.71.45:80', wait_timeout=10)
                 retry_count = 0  # Сбрасываем счетчик после успешного подключения
                 
                 while True:
