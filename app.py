@@ -201,38 +201,634 @@ LOGIN_HTML = """
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="window-title">
-            <div class="window-title-text">Вход в систему</div>
-            <div class="window-buttons">
-                <div class="window-button" onclick="window.location.href='/'">×</div>
+<div class="login-container">
+    <div class="window-title">
+        <div class="window-title-text">Вход в систему</div>
+        <div class="window-buttons">
+            <div class="window-button" onclick="window.location.href='/'">×</div>
+        </div>
+    </div>
+    
+    <div class="window-content">
+        <h1>Вход в панель администратора</h1>
+        
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% endif %}
+        
+        <form method="post" action="/login">
+            <div class="form-group">
+                <label for="username">Логин:</label>
+                <input type="text" id="username" name="username" required>
             </div>
+            
+            <div class="form-group">
+                <label for="password">Пароль:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <button type="submit">Войти</button>
+        </form>
+        
+        <a href="/" class="back-link">← Вернуться на главную</a>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+# HTML-страница для админ-панели (в стиле Windows 95/98)
+ADMIN_HTML = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление компьютерами</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
+    <style>
+        @font-face {
+            font-family: 'MS Sans Serif';
+            src: url('https://unpkg.com/98.css@0.1.17/dist/ms_sans_serif.woff2') format('woff2');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        @font-face {
+            font-family: 'MS Sans Serif';
+            src: url('https://unpkg.com/98.css@0.1.17/dist/ms_sans_serif_bold.woff2') format('woff2');
+            font-weight: bold;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'MS Sans Serif', sans-serif;
+            background-color: #008080;
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+        }
+        
+        .window {
+            background-color: #c0c0c0;
+            border: 2px solid #fff;
+            border-right-color: #000;
+            border-bottom-color: #000;
+            box-shadow: 2px 2px 0 #dfdfdf inset, -2px -2px 0 #808080 inset;
+            margin-bottom: 20px;
+        }
+        
+        .window-title {
+            background: linear-gradient(90deg, #000080, #1084d0);
+            color: white;
+            font-weight: bold;
+            padding: 3px 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .window-title-text {
+            flex-grow: 1;
+            text-align: center;
+        }
+        
+        .window-content {
+            padding: 10px;
+        }
+        
+        h1 {
+            color: #000;
+            font-size: 16px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        
+        .tab {
+            padding: 5px 10px;
+            margin-right: 2px;
+            background-color: #c0c0c0;
+            border: 2px solid;
+            border-color: #fff #000 #000 #fff;
+            cursor: pointer;
+        }
+        
+        .tab.active {
+            background-color: #dfdfdf;
+            border-color: #000 #fff #fff #000;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 10px;
+            background-color: #c0c0c0;
+            border: 2px solid;
+            border-color: #7c7c7c #fff #fff #7c7c7c;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .input-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        input[type="text"], 
+        input[type="number"],
+        select,
+        textarea {
+            padding: 5px;
+            font-size: 12px;
+            border: 2px solid;
+            border-color: #7c7c7c #fff #fff #7c7c7c;
+            background-color: #fff;
+            font-family: 'MS Sans Serif', sans-serif;
+        }
+        
+        input[type="text"]:focus, 
+        input[type="number"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+        }
+        
+        #commandInput {
+            flex: 1;
+        }
+        
+        button {
+            padding: 5px 10px;
+            background-color: #c0c0c0;
+            border: 2px solid #fff;
+            border-right-color: #000;
+            border-bottom-color: #000;
+            font-family: 'MS Sans Serif', sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        button:active {
+            border-color: #000 #fff #fff #000;
+        }
+        
+        #response {
+            background-color: #000;
+            color: #0f0;
+            padding: 10px;
+            border: 2px solid;
+            border-color: #7c7c7c #fff #fff #7c7c7c;
+            width: 100%;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            box-sizing: border-box;
+            margin-top: 10px;
+        }
+        
+        .client-list {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 15px;
+        }
+        
+        .client-list th, .client-list td {
+            padding: 5px;
+            text-align: left;
+            border: 1px solid #7c7c7c;
+        }
+        
+        .client-list th {
+            background-color: #dfdfdf;
+        }
+        
+        .client-list tr:hover {
+            background-color: #dfdfdf;
+        }
+        
+        .status-online {
+            color: #008000;
+            font-weight: bold;
+        }
+        
+        .status-offline {
+            color: #ff0000;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 10px;
+            color: #000;
+            text-decoration: none;
+            padding: 5px 10px;
+            background-color: #c0c0c0;
+            border: 2px solid #fff;
+            border-right-color: #000;
+            border-bottom-color: #000;
+        }
+        
+        .back-link:active {
+            border-color: #000 #fff #fff #000;
+        }
+        
+        .logout-link {
+            color: #000;
+            text-decoration: none;
+            padding: 3px 8px;
+            background-color: #c0c0c0;
+            border: 2px solid #fff;
+            border-right-color: #000;
+            border-bottom-color: #000;
+            font-size: 11px;
+        }
+        
+        .logout-link:active {
+            border-color: #000 #fff #fff #000;
+        }
+        
+        .settings-group {
+            margin-bottom: 10px;
+        }
+        
+        .settings-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .success-message {
+            background-color: #c0c0c0;
+            color: #008000;
+            padding: 5px;
+            border: 2px solid;
+            border-color: #7c7c7c #fff #fff #7c7c7c;
+            margin-bottom: 10px;
+            display: none;
+        }
+        
+        .hosts-textarea {
+            width: 100%;
+            height: 150px;
+            resize: vertical;
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .command-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 5px;
+            border: 1px solid #7c7c7c;
+            background-color: #dfdfdf;
+        }
+        
+        .command-name {
+            flex: 1;
+            font-weight: bold;
+        }
+        
+        .command-description {
+            flex: 2;
+            color: #444;
+            font-size: 11px;
+            margin: 0 10px;
+        }
+        
+        .provider-row {
+            cursor: pointer;
+        }
+        
+        .provider-row.selected {
+            background-color: #0000aa;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <div class="window-title">
+            <a href="/" class="back-link">← Главная</a>
+            <div class="window-title-text">Управление компьютерами</div>
+            <a href="/logout" class="logout-link">Выйти</a>
         </div>
         
         <div class="window-content">
-            <h1>Вход в панель администратора</h1>
+            <div class="tabs">
+                <div class="tab active" data-tab="clients">Клиенты</div>
+                <div class="tab" data-tab="settings">Настройки</div>
+                <div class="tab" data-tab="hosts">Хосты</div>
+                <div class="tab" data-tab="commands">Команды</div>
+            </div>
             
-            {% if error %}
-            <div class="error-message">{{ error }}</div>
-            {% endif %}
+            <div class="tab-content active" id="clients-tab">
+                <table class="client-list">
+                    <thead>
+                        <tr>
+                            <th>Провайдер</th>
+                            <th>Статус</th>
+                            <th>Последний пинг</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientList">
+                        <!-- Клиенты будут добавлены динамически -->
+                    </tbody>
+                </table>
+                
+                <div class="input-container">
+                    <input type="text" id="commandInput" placeholder="Введите команду для выполнения">
+                    <button onclick="sendCommand()">Отправить</button>
+                </div>
+                <pre id="response">[Консоль готова к работе]
+</pre>
+            </div>
             
-            <form method="post" action="/login">
-                <div class="form-group">
-                    <label for="username">Логин:</label>
-                    <input type="text" id="username" name="username" required>
+            <div class="tab-content" id="settings-tab">
+                <div id="pingSuccessMessage" class="success-message">Настройки успешно применены</div>
+                
+                <div class="settings-group">
+                    <label for="pingInterval">Интервал пинга (секунды):</label>
+                    <input type="number" id="pingInterval" min="0.1" step="0.1" value="1.0">
+                    <small style="color: #444; display: block; margin-top: 3px;">Минимальное значение: 0.1 секунды</small>
                 </div>
                 
-                <div class="form-group">
-                    <label for="password">Пароль:</label>
-                    <input type="password" id="password" name="password" required>
+                <div class="settings-group">
+                    <label>Применить к:</label>
+                    <select id="applyTo">
+                        <option value="all">Всем провайдерам</option>
+                        <option value="selected">Выбранному провайдеру</option>
+                    </select>
                 </div>
                 
-                <button type="submit">Войти</button>
-            </form>
+                <button id="applySettings">Применить настройки</button>
+            </div>
             
-            <a href="/" class="back-link">← Вернуться на главную</a>
+            <div class="tab-content" id="hosts-tab">
+                <div id="hostsSuccessMessage" class="success-message">Список хостов успешно обновлен</div>
+                
+                <div class="settings-group">
+                    <label>Применить к:</label>
+                    <select id="hostsApplyTo">
+                        <option value="all">Всем провайдерам</option>
+                        <option value="selected">Выбранному провайдеру</option>
+                    </select>
+                </div>
+                
+                <div class="settings-group">
+                    <label for="hostsList">Список хостов (по одному на строку):</label>
+                    <textarea id="hostsList" class="hosts-textarea" placeholder="Введите хосты для пинга, по одному на строку. Например:
+google.com
+8.8.8.8
+yandex.ru"></textarea>
+                </div>
+                
+                <button id="applyHosts">Обновить хосты</button>
+            </div>
+            
+            <div class="tab-content" id="commands-tab">
+                <div class="command-item">
+                    <div class="command-name">ipconfig</div>
+                    <div class="command-description">Показать сетевые настройки компьютера</div>
+                    <button onclick="sendPredefinedCommand('ipconfig')">Выполнить</button>
+                </div>
+                
+                <div class="command-item">
+                    <div class="command-name">systeminfo</div>
+                    <div class="command-description">Показать информацию о системе</div>
+                    <button onclick="sendPredefinedCommand('systeminfo')">Выполнить</button>
+                </div>
+                
+                <div class="command-item">
+                    <div class="command-name">netstat -an</div>
+                    <div class="command-description">Показать активные сетевые соединения</div>
+                    <button onclick="sendPredefinedCommand('netstat -an')">Выполнить</button>
+                </div>
+                
+                <div class="command-item">
+                    <div class="command-name">tracert google.com</div>
+                    <div class="command-description">Трассировка маршрута до google.com</div>
+                    <button onclick="sendPredefinedCommand('tracert google.com')">Выполнить</button>
+                </div>
+                
+                <div class="command-item">
+                    <div class="command-name">nslookup google.com</div>
+                    <div class="command-description">DNS-запрос для google.com</div>
+                    <button onclick="sendPredefinedCommand('nslookup google.com')">Выполнить</button>
+                </div>
+                
+                <div class="command-item">
+                    <div class="command-name">restart_client</div>
+                    <div class="command-description">Перезапустить клиент мониторинга (сохраняет настройки)</div>
+                    <button onclick="sendPredefinedCommand('restart_client')">Выполнить</button>
+                </div>
+            </div>
         </div>
     </div>
+
+    <script>
+        var socket = io();
+        var selectedProvider = null;
+        
+        // Переключение вкладок
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                
+                this.classList.add('active');
+                document.getElementById(this.dataset.tab + '-tab').classList.add('active');
+            });
+        });
+        
+        socket.on('connect', function() {
+            console.log('Connected to server');
+            // Запрашиваем список клиентов при подключении
+            socket.emit('get_clients');
+        });
+        
+        socket.on('clients_list', function(clients) {
+            updateClientList(clients);
+        });
+        
+        socket.on('client_update', function(client) {
+            // Обновляем информацию о клиенте в списке
+            socket.emit('get_clients');
+        });
+        
+        socket.on('command_result', function(data) {
+            var responseBox = document.getElementById('response');
+            responseBox.innerText += data + '\\n';
+            responseBox.scrollTop = responseBox.scrollHeight; // Автоскролл вниз
+        });
+        
+        function updateClientList(clients) {
+            var clientList = document.getElementById('clientList');
+            clientList.innerHTML = '';
+            
+            for (var provider in clients) {
+                var client = clients[provider];
+                var row = document.createElement('tr');
+                row.className = 'provider-row';
+                row.dataset.provider = provider;
+                
+                if (selectedProvider === provider) {
+                    row.classList.add('selected');
+                }
+                
+                var lastPingTime = new Date(client.last_ping);
+                var now = new Date();
+                var timeDiff = (now - lastPingTime) / 1000; // в секундах
+                
+                var isOnline = timeDiff < 30; // Считаем клиента онлайн, если пинг был менее 30 секунд назад
+                
+                row.innerHTML = `
+                    <td>${provider}</td>
+                    <td class="${isOnline ? 'status-online' : 'status-offline'}">${isOnline ? 'Онлайн' : 'Оффлайн'}</td>
+                    <td>${lastPingTime.toLocaleString()}</td>
+                `;
+                
+                row.addEventListener('click', function() {
+                    var provider = this.dataset.provider;
+                    selectProvider(provider);
+                });
+                
+                clientList.appendChild(row);
+            }
+        }
+        
+        function selectProvider(provider) {
+            selectedProvider = provider;
+            
+            // Обновляем выделение в таблице
+            document.querySelectorAll('.provider-row').forEach(function(row) {
+                if (row.dataset.provider === provider) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+            
+            // Автоматически переключаем на "Выбранному провайдеру"
+            document.getElementById('applyTo').value = 'selected';
+            document.getElementById('hostsApplyTo').value = 'selected';
+            
+            console.log('Выбран провайдер:', provider);
+            
+            // Запрашиваем список хостов для выбранного провайдера
+            socket.emit('get_provider_hosts', { provider: provider });
+        }
+        
+        function sendCommand() {
+            var command = document.getElementById('commandInput').value.trim();
+            if (command) {
+                socket.emit('admin_command', command);
+                document.getElementById('response').innerText += `[${new Date().toLocaleTimeString()}] > ${command}\\n`;
+                document.getElementById('commandInput').value = '';
+            }
+        }
+        
+        function sendPredefinedCommand(command) {
+            socket.emit('admin_command', command);
+            document.getElementById('response').innerText += `[${new Date().toLocaleTimeString()}] > ${command}\\n`;
+            
+            // Переключаемся на вкладку клиентов для просмотра результата
+            document.querySelector('.tab[data-tab="clients"]').click();
+        }
+        
+        // Отправка команды по нажатию Enter
+        document.getElementById('commandInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendCommand();
+            }
+        });
+        
+        // Обработчик кнопки применения настроек пинга
+        document.getElementById('applySettings').addEventListener('click', function() {
+            var pingInterval = parseFloat(document.getElementById('pingInterval').value);
+            var applyTo = document.getElementById('applyTo').value;
+            
+            if (isNaN(pingInterval) || pingInterval < 0.1) {
+                alert('Пожалуйста, введите корректный интервал пинга (минимум 0.1 секунды)');
+                return;
+            }
+            
+            if (applyTo === 'selected' && !selectedProvider) {
+                alert('Пожалуйста, выберите провайдера из списка');
+                return;
+            }
+            
+            // Отправляем настройки на сервер
+            socket.emit('update_ping_interval', {
+                interval: pingInterval,
+                provider: applyTo === 'selected' ? selectedProvider : 'all'
+            });
+            
+            // Показываем сообщение об успехе
+            var successMessage = document.getElementById('pingSuccessMessage');
+            successMessage.style.display = 'block';
+            successMessage.textContent = `Интервал пинга (${pingInterval} сек) успешно применен к ${applyTo === 'selected' ? 'провайдеру ' + selectedProvider : 'всем провайдерам'}`;
+            
+            // Скрываем сообщение через 3 секунды
+            setTimeout(function() {
+                successMessage.style.display = 'none';
+            }, 3000);
+        });
+        
+        // Обработчик кнопки обновления хостов
+        document.getElementById('applyHosts').addEventListener('click', function() {
+            var hostsText = document.getElementById('hostsList').value.trim();
+            var applyTo = document.getElementById('hostsApplyTo').value;
+            
+            if (!hostsText) {
+                alert('Пожалуйста, введите хотя бы один хост');
+                return;
+            }
+            
+            if (applyTo === 'selected' && !selectedProvider) {
+                alert('Пожалуйста, выберите провайдера из списка');
+                return;
+            }
+            
+            // Разбиваем текст на строки и удаляем пустые строки
+            var hosts = hostsText.split('\\n').map(h => h.trim()).filter(h => h);
+            
+            // Отправляем список хостов на сервер
+            socket.emit('update_hosts', {
+                hosts: hosts,
+                provider: applyTo === 'selected' ? selectedProvider : 'all'
+            });
+            
+            // Показываем сообщение об успехе
+            var successMessage = document.getElementById('hostsSuccessMessage');
+            successMessage.style.display = 'block';
+            successMessage.textContent = `Список хостов (${hosts.length} шт.) успешно обновлен для ${applyTo === 'selected' ? 'провайдера ' + selectedProvider : 'всех провайдеров'}`;
+            
+            // Скрываем сообщение через 3 секунды
+            setTimeout(function() {
+                successMessage.style.display = 'none';
+            }, 3000);
+        });
+        
+        // Обработчик получения списка хостов для провайдера
+        socket.on('provider_hosts', function(data) {
+            if (data.provider === selectedProvider) {
+                var hostsTextarea = document.getElementById('hostsList');
+                hostsTextarea.value = data.hosts.join('\\n');
+            }
+        });
+        
+        // Обновляем список клиентов каждые 10 секунд
+        setInterval(function() {
+            socket.emit('get_clients');
+        }, 10000);
+    </script>
 </body>
 </html>
 """
@@ -265,7 +861,7 @@ def admin():
     if not session.get('authenticated'):
         return redirect(url_for('login'))
     
-    return render_template('admin.html')
+    return render_template_string(ADMIN_HTML)
 
 @app.route('/get_history')
 def get_history():
@@ -286,8 +882,6 @@ def get_history():
                 print(f"Ошибка чтения {filename}: Неверный JSON")
             except Exception as e:
                 print(f"Ошибка чтения {filename}: {str(e)}")
-    
-    # Исправлена ошибка с незакрытой скобкой
     history.sort(key=lambda x: x.get('timestamp', ''))
     return jsonify(history)
 
