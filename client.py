@@ -6,6 +6,8 @@ import re
 import time
 import json
 import os
+import platform  # Добавляем для определения версии Windows
+import shutil    # Добавляем для работы с файлами автозагрузки
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 
@@ -181,7 +183,6 @@ class PingMonitor:
                     
                     # Сбрасываем счетчик неудач
                     self.ping_failures[host] = 0
-                    
                     return int(match.group(1) or match.group(2))
                 
                 # Увеличиваем счетчик неудач
@@ -258,11 +259,9 @@ class PingMonitor:
                         raise  # Перезапускаем соединение
                     
                     # Периодически проверяем хосты в черном списке
-                    # Каждые 10 циклов (или примерно каждые 10 секунд при стандартном интервале)
                     if int(time.time()) % 10 == 0:
                         current_time = datetime.now()
                         for host, blacklist_time in list(self.failed_hosts.items()):
-                            # Если прошло достаточно времени, удаляем хост из черного списка
                             if (current_time - blacklist_time).total_seconds() >= self.retry_interval:
                                 del self.failed_hosts[host]
                                 self.ping_failures[host] = 0
@@ -399,8 +398,115 @@ def get_hosts():
 
     return hosts
 
+def get_windows_version():
+    """Определяет версию Windows"""
+    try:
+        version = platform.system() + " " + platform.release()
+        if "Windows" in version:
+            # Для Windows Server или других версий получаем дополнительную информацию
+            detailed_version = platform.version()
+            if "Server" in version or "Server" in detailed_version:
+                return f"Windows Server (Build {detailed_version})"
+            return f"Windows {platform.release()} (Build {detailed_version})"
+        return version
+    except Exception as e:
+        print(f"[ERROR] Не удалось определить версию ОС: {str(e)}")
+        return "Неизвестная версия Windows"
+
+def add_to_startup():
+    """Добавляет программу в автозагрузку через папку Startup (без прав администратора)"""
+    if not sys.platform.startswith('win'):
+        print("[INFO] Автозагрузка поддерживается только на Windows")
+        return False
+    
+    try:
+        # Получаем путь к текущему скрипту
+        script_path = os.path.abspath(sys.argv[0])
+        script_name = os.path.splitext(os.path.basename(script_path))[0]
+        
+        # Путь к папке автозагрузки текущего пользователя
+        startup_folder = os.path.join(os.getenv('APPDATA'), 
+                                    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+        
+        # Создаем .bat файл для запуска Python скрипта
+        bat_content = f'@echo off\npython "{script_path}"\n'
+        bat_path = os.path.join(startup_folder, f"{script_name}.bat")
+        
+        # Записываем .bat файл
+        with open(bat_path, 'w', encoding='utf-8') as f:
+            f.write(bat_content)
+        
+        print("[INFO] Программа успешно добавлена в автозагрузку через папку Startup")
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Не удалось добавить в автозагрузку: {str(e)}")
+        return False
+
+def remove_from_startup():
+    """Удаляет программу из автозагрузки через папку Startup"""
+    if not sys.platform.startswith('win'):
+        print("[INFO] Автозагрузка поддерживается только на Windows")
+        return False
+    
+    try:
+        script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+        startup_folder = os.path.join(os.getenv('APPDATA'), 
+                                    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+        bat_path = os.path.join(startup_folder, f"{script_name}.bat")
+        
+        if os.path.exists(bat_path):
+            os.remove(bat_path)
+            print("[INFO] Программа успешно удалена из автозагрузки")
+            return True
+        else:
+            print("[INFO] Программа не найдена в автозагрузке")
+            return True
+            
+    except Exception as e:
+        print(f"[ERROR] Не удалось удалить из автозагрузки: {str(e)}")
+        return False
+
+def check_startup_status():
+    """Проверяет, находится ли программа в автозагрузке через папку Startup"""
+    if not sys.platform.startswith('win'):
+        return False
+    
+    try:
+        script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+        startup_folder = os.path.join(os.getenv('APPDATA'), 
+                                    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+        bat_path = os.path.join(startup_folder, f"{script_name}.bat")
+        
+        return os.path.exists(bat_path)
+        
+    except Exception as e:
+        print(f"[ERROR] Ошибка проверки автозагрузки: {str(e)}")
+        return False
+
 async def main():
     print("\nДобро пожаловать в программу мониторинга пинга!")
+    
+    # Определяем версию Windows
+    windows_version = get_windows_version()
+    print(f"[INFO] Операционная система: {windows_version}")
+    
+    # Проверяем статус автозагрузки
+    is_in_startup = check_startup_status()
+    print(f"[INFO] Программа в автозагрузке: {'Да' if is_in_startup else 'Нет'}")
+    
+    # Спрашиваем про автозагрузку только при первом запуске
+    config = load_config()
+    if not config or not is_in_startup:
+        while True:
+            choice = input("\nДобавить программу в автозагрузку Windows? (да/нет): ").strip().lower()
+            if choice == 'да':
+                add_to_startup()
+                break
+            elif choice == 'нет':
+                break
+            else:
+                print("Пожалуйста, введите 'да' или 'нет'.")
     
     # Пытаемся загрузить конфигурацию
     config = load_config()
